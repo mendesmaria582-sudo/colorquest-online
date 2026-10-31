@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ColorQuest — Match • Play • Win!</title>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#172033;background:#f4f7fb}
+*{box-sizing:border-box}body{margin:0;padding:22px}.wrap{max-width:850px;margin:auto}
+header{text-align:center;margin-bottom:20px}h1{margin:0;color:#293b8f;font-size:2.4rem}header p{margin:4px;color:#596579}
+.panel{background:white;border-radius:16px;padding:18px;margin:12px 0;box-shadow:0 4px 18px #17203312}
+input,button{font:inherit;border-radius:10px;padding:11px 13px;border:1px solid #cbd5e1;margin:4px}
+button{background:#293b8f;color:white;border:0;cursor:pointer;font-weight:650}button:disabled{opacity:.4;cursor:not-allowed}
+input{max-width:100%}.hidden{display:none}.players{display:flex;gap:8px;flex-wrap:wrap}.player{background:#eef2ff;padding:10px 13px;border-radius:10px}
+.cards{display:flex;gap:8px;flex-wrap:wrap;min-height:90px}.card{width:64px;height:94px;border:4px solid white;border-radius:12px;color:white;font-size:1.15rem;font-weight:800;box-shadow:0 2px 6px #0003;display:grid;place-items:center;text-shadow:0 1px 2px #0008}
+.red{background:#dc3b45}.blue{background:#2874ce}.green{background:#269b68}.yellow{background:#e2b72b;color:#222;text-shadow:none}.wild{background:conic-gradient(#dc3b45 0 25%,#2874ce 0 50%,#269b68 0 75%,#e2b72b 0)}
+.card.playable{outline:3px solid #1c9b62;cursor:pointer}.card:disabled{opacity:.45}
+.status{font-weight:650;color:#293b8f}.muted{color:#687386;font-size:.9rem}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+@media(max-width:500px){body{padding:10px}h1{font-size:2rem}.card{width:54px;height:82px}}
+</style>
+</head>
+<body><div class="wrap">
+<header><h1>🌈 ColorQuest</h1><p>Match • Play • Win!</p></header>
+<section class="panel" id="entry">
+<h2>Join the fun</h2><div class="row"><input id="name" placeholder="Your nickname" maxlength="18"><button id="create">Create a room</button></div>
+<div class="row"><input id="code" placeholder="6-character room code" maxlength="6"><button id="join">Join a room</button></div>
+<p class="muted">Create a room and share its code with family or friends. Up to 4 players can join.</p>
+</section>
+<section class="panel hidden" id="lobby">
+<div class="row"><h2 style="margin-right:auto">Room <span id="roomCode"></span></h2><button id="copy">Copy invite code</button></div>
+<div class="players" id="players"></div><p class="status" id="lobbyMsg"></p>
+<div class="row"><button id="bot">Add computer player</button><button id="start">Start game</button><button id="close" style="background:#8b2635">Close room</button></div>
+<p class="muted">The host can start when at least two players have joined.</p>
+</section>
+<section class="panel hidden" id="game">
+<div class="row"><h2 style="margin-right:auto">ColorQuest game</h2><strong>Room <span id="gameCode"></span></strong></div>
+<p class="status" id="message"></p><div class="players" id="gamePlayers"></div>
+<p>Top card: <span id="topCard"></span> &nbsp; Active colour: <strong id="activeColor"></strong></p>
+<h3>Your cards</h3><div class="cards" id="hand"></div>
+<div class="row"><button id="draw">Draw a card and pass</button></div>
+<p class="muted">Play a card matching the active colour or the top card's symbol. Wild cards let you choose a colour.</p>
+</section>
+<p class="muted">Prototype notice: this is an early test build. Game rules, reconnect handling, privacy protections and production hosting still need further testing before public release.</p>
+</div>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket=io();let roomCode="",playerId="",hand=[],state=null;
+const $=id=>document.getElementById(id);
+function show(id){$(id).classList.remove("hidden")}function hide(id){$(id).classList.add("hidden")}
+function cardLabel(c){return c.value.toUpperCase()}
+function makeCard(c,clickable,index){const b=document.createElement("button");b.className="card "+c.color+(clickable?" playable":"");b.textContent=cardLabel(c);b.disabled=!clickable;if(clickable)b.onclick=()=>{let color=c.color;if(c.color==="wild"){color=prompt("Choose a colour: red, blue, green or yellow","blue");if(!["red","blue","green","yellow"].includes((color||"").toLowerCase()))return;color=color.toLowerCase()}socket.emit("playCard",{index,color})};return b}
+$("create").onclick=()=>socket.emit("createRoom",{name:$("name").value.trim()||"Host"});
+$("join").onclick=()=>socket.emit("joinRoom",{code:$("code").value.trim().toUpperCase(),name:$("name").value.trim()||"Player"});
+$("copy").onclick=()=>navigator.clipboard?.writeText(roomCode).then(()=>alert("Room code copied: "+roomCode));
+$("bot").onclick=()=>socket.emit("addBot");$("start").onclick=()=>socket.emit("startGame");
+$("close").onclick=()=>{if(confirm("Close this room for everyone?"))socket.emit("closeRoom")};
+$("draw").onclick=()=>socket.emit("drawCard");
+socket.on("joined",d=>{roomCode=d.code;playerId=d.playerId;$("roomCode").textContent=roomCode;$("gameCode").textContent=roomCode;hide("entry");show("lobby")});
+socket.on("state",s=>{state=s;roomCode=s.code;$("roomCode").textContent=s.code;$("gameCode").textContent=s.code;
+$("players").innerHTML="";$("gamePlayers").innerHTML="";
+s.players.forEach((p,i)=>{const el=document.createElement("div");el.className="player";el.textContent=(p.id===s.currentPlayerId?"▶ ":"")+(p.name)+(p.isBot?" 🤖":"")+(p.connected?"":" (offline)")+" · "+p.count+" cards";$("players").append(el);$("gamePlayers").append(el.cloneNode(true))});
+$("lobbyMsg").textContent=s.message;$("message").textContent=s.message;
+$("start").disabled=s.players.length<2||s.started;$("bot").disabled=s.players.length>=4||s.started;
+if(s.started){hide("lobby");show("game")}else{show("lobby");hide("game")}
+if(s.top){$("topCard").textContent=s.top.value.toUpperCase();$("topCard").style.color=s.top.color==="yellow"?"#b08a00":s.top.color;$("activeColor").textContent=s.activeColor}
+if(s.winner){$("message").textContent=s.winner+" wins! 🎉"}
+renderHand();
+});
+function renderHand(){const area=$("hand");area.innerHTML="";if(!state)return;const myTurn=state.currentPlayerId===playerId;hand.forEach((c,i)=>area.append(makeCard(c,myTurn&&(c.color==="wild"||c.color===state.activeColor||c.value===state.top.value),i)));$("draw").disabled=!myTurn||!!state.winner}
+socket.on("yourHand",h=>{hand=h;renderHand()});
+socket.on("errorMessage",m=>alert(m));
+socket.on("roomClosed",()=>{alert("The host closed this room.");location.reload()});
+</script></body></html>
